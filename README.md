@@ -1,2 +1,2 @@
 # electionanalytics-app
-Analyses results of past elections
+2026 Assembly Election Result Analyser
