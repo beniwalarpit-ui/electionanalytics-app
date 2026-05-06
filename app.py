@@ -102,7 +102,7 @@ st.markdown("# 🇮🇳 State Elections 2026 Analytics")
 @st.cache_data
 def load_data():
     return pd.read_csv(
-    "2001_2021_5_States_AC_Data.csv"
+    "2001_2026_5_States_AC_Data.csv"
     )
    
 # =========================================================
@@ -138,19 +138,74 @@ def clean_data(df):
 
 df = clean_data(load_data())
 
+
+# =========================================================
+# MANUAL 2026 TURNOUT OVERRIDE
+# =========================================================
+
+turnout_2026 = {
+
+    "West-Bengal": 92.47,
+    "Assam": 85.38,
+    "Kerala": 78.03,
+    "Puducherry": 89.83,
+    "Tamil-Nadu": 85.05
+}
+
+for state_name, turnout in turnout_2026.items():
+
+    mask = (
+        (df["year"] == 2026) &
+        (df["state"] == state_name)
+    )
+
+    df.loc[mask, "poll_pct"] = turnout
+
+# =========================================================
+# REMOVE FULL DUPLICATE ROWS
+# =========================================================
+
+initial_rows = len(df)
+
+df = df.drop_duplicates().copy()
+
+removed_rows = initial_rows - len(df)
+
+print(f"Removed {removed_rows} fully duplicate rows")
+
 # =========================================================
 # FILTERS
 # =========================================================
 st.sidebar.markdown("## Filters")
 
+state_options = sorted(df['state'].dropna().unique())
+
+default_state_index = (
+    state_options.index("Tamil-Nadu")
+    if "Tamil-Nadu" in state_options
+    else 0
+)
+
 state = st.sidebar.selectbox(
     "State",
-    sorted(df['state'].dropna().unique())
+    state_options,
+    index=default_state_index
+)
+
+year_options = sorted(
+    df[df['state'] == state]['year'].dropna().unique()
+)
+
+default_year_index = (
+    year_options.index(2026)
+    if 2026 in year_options
+    else len(year_options) - 1
 )
 
 year = st.sidebar.selectbox(
     "Year",
-    sorted(df['year'].dropna().unique())
+    year_options,
+    index=default_year_index
 )
 
 df_filtered = df[
@@ -179,6 +234,7 @@ party_alias = {
 
     # NATIONAL
     "BHARATIYA JANTA PARTY": "BJP",
+    "BHARATIYA JANATA PARTY": "BJP",
     "INDIAN NATIONAL CONGRESS": "INC",
     "COMMUNIST PARTY OF INDIA": "CPI",
     "COMMUNIST PARTY OF INDIA (MARXIST)": "CPM",
@@ -190,6 +246,7 @@ party_alias = {
 
     # TAMIL NADU
     "DRAVIDA MUNETRA KAZHAGAM": "DMK",
+    "DRAVIDA MUNNETRA KAZHAGAM":"DMK",
     "ALL INDIA ANNA DRAVIDA MUNNETRA KAZHAGAM": "AIADMK",
     "PATTALI MAKKAL KATCHI": "PMK",
     "DESIYA MURPOKKU DRAVIDA KAZHAGAM": "DMDK",
@@ -199,6 +256,8 @@ party_alias = {
     "MANITHANEYA MAKKAL KATCHI": "MMK",
     "PUTHIYA TAMILAGAM": "PT",
     "M.G.R.ANNA D.M.KAZHAGAM": "MGR-ADMK",
+    "TAMILAGA VETTRI KAZHAGAM":"TVK",
+    "AMMA MAKKAL MUNNETTRA KAZAGAM":"AMMK",
 
     # WEST BENGAL
     "ALL INDIA TRINAMOOL CONGRESS": "AITC",
@@ -209,9 +268,12 @@ party_alias = {
     "GORKHA NATIONAL LIBERATION FRONT": "GNLF",
     "SOCIALIST UNITY CENTRE OF INDIA (COMMUNIST)": "SUCI(C)",
     "REVOLUTIONARY MARXIST PARTY OF INDIA": "RMPI",
+    "AAM JANATA UNNAYAN PARTY": "AJUP",
+    "ALL INDIA SECULAR FRONT": "AISF",
 
     # ASSAM / NORTH EAST
     "ASOM GANA PARISAD": "AGP",
+    "ASOM GANA PARISHAD": "AGP",
     "ASOM GANA PARISHAD PRAGTISHEEL": "AGP-P",
     "ALL INDIA UNITED DEMOCRATIC FRONT": "AIUDF",
     "ASSAM UNITED DEMOCRATIC FRONT": "AUDF",
@@ -243,6 +305,8 @@ party_alias = {
     "ALL INDIA N.R. CONGRESS": "AINRC",
     "PUDHUCHERRY MAKKAL CONGRESS": "PMC",
     "PUDHUCHERRY MUNNETRA CONGRESS": "PUMC",
+    "LATCHIYA JANANAYAKA KATCHI (LJK)":"LJK",
+    "NEYAM MAKKAL KAZHAGAM":"NMK",
 
     # OTHER
     "NATIONAL SECULAR CONFERENCE": "NSC",
@@ -312,6 +376,7 @@ party_colors = {
     "MMK": "#16A085",          # green-teal
     "PT": "#8E44AD",           # purple
     "MGR-ADMK": "#2ECC71",
+    "TVK":"#CCC42E",
 
     # =====================================================
     # WEST BENGAL
@@ -420,42 +485,106 @@ winners['margin_ratio'] = (
 )
 
 # =========================================================
-# SAFE VOTE GAP
+# TRUE VOTE GAP + TRUE MARGIN %
 # =========================================================
 
-top2 = df_filtered[
-    df_filtered['candidate_rank'].notna()
-].copy()
+top2 = df_filtered.copy()
+
+# ---------------------------------------------------------
+# CLEAN RANK
+# ---------------------------------------------------------
 
 top2['candidate_rank'] = pd.to_numeric(
     top2['candidate_rank'],
     errors='coerce'
 )
 
+# ---------------------------------------------------------
+# KEEP TOP 2
+# ---------------------------------------------------------
+
 top2 = top2[
     top2['candidate_rank'] <= 2
-]
+].copy()
 
-gap = (
-    top2
-    .sort_values(['ac_name', 'candidate_rank'])
-    .groupby('ac_name')['votes']
-    .apply(list)
-    .reset_index()
+# ---------------------------------------------------------
+# CLEAN NUMERIC FIELDS
+# ---------------------------------------------------------
+
+top2['votes'] = pd.to_numeric(
+    top2['votes'],
+    errors='coerce'
 )
 
-gap['vote_gap'] = gap['votes'].apply(
-    lambda x:
-        abs(x[0] - x[1])
-        if isinstance(x, list) and len(x) >= 2
-        else None
+# ---------------------------------------------------------
+# SORT
+# ---------------------------------------------------------
+
+top2 = top2.sort_values(
+    ['ac_no', 'candidate_rank']
 )
+
+# =========================================================
+# CONSTITUENCY METRICS
+# =========================================================
+
+metrics = []
+
+for ac_no, grp in top2.groupby('ac_no'):
+
+    grp = grp.sort_values('candidate_rank')
+
+    if len(grp) < 2:
+        continue
+
+    winner_votes = grp.iloc[0]['votes']
+    runner_votes = grp.iloc[1]['votes']
+
+    total_votes = grp['votes'].sum()
+
+    vote_gap = winner_votes - runner_votes
+
+    # -----------------------------------------------------
+    # TRUE ELECTORAL MARGIN %
+    # -----------------------------------------------------
+
+    margin_pct = (
+        vote_gap / total_votes
+    ) * 100 if total_votes > 0 else None
+
+    metrics.append({
+
+        'ac_no': ac_no,
+
+        'vote_gap': vote_gap,
+
+        'margin_pct_true': margin_pct
+    })
+
+# =========================================================
+# METRICS DF
+# =========================================================
+
+metrics_df = pd.DataFrame(metrics)
+
+# =========================================================
+# MERGE INTO WINNERS
+# =========================================================
 
 winners = winners.merge(
-    gap[['ac_name', 'vote_gap']],
-    on='ac_name',
+
+    metrics_df,
+
+    on='ac_no',
+
     how='left'
 )
+
+# =========================================================
+# OVERWRITE BAD IMPORTED VALUES
+# =========================================================
+
+winners['margin_pct'] = winners['margin_pct_true']
 
 # =========================================================
 # OVERVIEW KPI
@@ -657,7 +786,7 @@ state_geojson = json.loads(
 # LAYOUT
 # =========================================================
 col_map, col_legend = st.columns(
-    [6,1],
+    [9,2],
     gap="small"
 )
 
